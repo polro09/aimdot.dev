@@ -1,109 +1,131 @@
 // ========================================
-// web/utils/permissions.js
+// web/utils/permissions.js - 개선된 버전
 // ========================================
 const dataManager = require('../../utils/dataManager');
 const logger = require('../../utils/logger');
+const config = require('../../config');
 
-// 권한 레벨
+// 권한 레벨 정의
 const ROLES = {
     GUEST: 'guest',
     MEMBER: 'member',
     ADMIN: 'admin'
 };
 
-// 페이지별 필요 권한
-const PAGE_PERMISSIONS = {
-    '/': ROLES.GUEST,
-    '/dashboard': ROLES.ADMIN,
-    '/admin/permissions': ROLES.ADMIN,
-    '/admin/party': ROLES.ADMIN,
-    '/servers': ROLES.MEMBER,
-    '/party': ROLES.MEMBER,
-    '/party/create': ROLES.MEMBER,
-    '/logs': ROLES.ADMIN,
-    '/settings': ROLES.MEMBER
+// 권한 계층 구조
+const ROLE_HIERARCHY = {
+    [ROLES.ADMIN]: 3,
+    [ROLES.MEMBER]: 2,
+    [ROLES.GUEST]: 1
 };
 
 class PermissionManager {
     constructor() {
+        this.permissions = {
+            userRoles: {},
+            pagePermissions: {
+                '/': ROLES.GUEST,
+                '/party': ROLES.MEMBER,
+                '/dashboard': ROLES.ADMIN,
+                '/admin/permissions': ROLES.ADMIN,
+                '/servers': ROLES.ADMIN,
+                '/logs': ROLES.ADMIN,
+                '/settings': ROLES.ADMIN
+            }
+        };
+        
+        // 권한 캐시 (메모리 캐싱)
+        this.roleCache = new Map();
+        this.cacheTimeout = 5 * 60 * 1000; // 5분
+        
         this.loadPermissions();
     }
     
     async loadPermissions() {
         try {
-            const permissions = await dataManager.read('web_permissions');
-            if (permissions) {
-                this.permissions = permissions;
-            } else {
-                this.permissions = {
-                    pagePermissions: PAGE_PERMISSIONS,
-                    userRoles: {},
-                    createdAt: new Date().toISOString()
-                };
-                await this.savePermissions();
+            const savedPermissions = await dataManager.read('web_permissions');
+            if (savedPermissions) {
+                this.permissions = { ...this.permissions, ...savedPermissions };
+                logger.permission('권한 데이터 로드 완료');
             }
+            
+            // 관리자 ID 자동 설정
+            if (config.bot.adminIds && config.bot.adminIds.length > 0) {
+                config.bot.adminIds.forEach(adminId => {
+                    this.permissions.userRoles[adminId] = ROLES.ADMIN;
+                });
+            }
+            
+            await this.savePermissions();
         } catch (error) {
             logger.error(`권한 로드 오류: ${error.message}`);
-            this.permissions = {
-                pagePermissions: PAGE_PERMISSIONS,
-                userRoles: {}
-            };
         }
     }
     
     async savePermissions() {
         try {
             await dataManager.write('web_permissions', this.permissions);
-            logger.info('✅ 권한 설정 저장됨');
+            logger.permission('권한 데이터 저장 완료');
+            this.clearCache(); // 캐시 초기화
         } catch (error) {
             logger.error(`권한 저장 오류: ${error.message}`);
         }
     }
     
     getUserRole(userId) {
-        const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',') : [];
-        if (adminIds.includes(userId)) {
-            return ROLES.ADMIN;
+        // 캐시 확인
+        const cached = this.getCached(userId);
+        if (cached !== null) {
+            return cached;
         }
         
-        return this.permissions.userRoles[userId] || ROLES.GUEST;
+        // 권한 확인
+        const role = this.permissions.userRoles[userId] || ROLES.GUEST;
+        
+        // 캐시에 저장
+        this.setCache(userId, role);
+        
+        return role;
     }
     
     async setUserRole(userId, role) {
         if (!Object.values(ROLES).includes(role)) {
-            throw new Error('잘못된 역할입니다.');
+            throw new Error(`유효하지 않은 권한: ${role}`);
         }
         
         this.permissions.userRoles[userId] = role;
         await this.savePermissions();
-        logger.info(`📝 사용자 권한 변경: ${userId} -> ${role}`);
+        
+        logger.permission(`사용자 권한 변경: ${userId} -> ${role}`);
     }
     
     hasPermission(userRole, requiredRole) {
-        const roleHierarchy = {
-            [ROLES.GUEST]: 0,
-            [ROLES.MEMBER]: 1,
-            [ROLES.ADMIN]: 2
-        };
+        const userLevel = ROLE_HIERARCHY[userRole] || 0;
+        const requiredLevel = ROLE_HIERARCHY[requiredRole] || 999;
         
-        return roleHierarchy[userRole] >= roleHierarchy[requiredRole];
+        return userLevel >= requiredLevel;
     }
     
     canAccessPage(userId, path) {
         const userRole = this.getUserRole(userId);
-        const requiredRole = this.permissions.pagePermissions[path] || ROLES.GUEST;
+        const requiredRole = this.permissions.pagePermissions[path];
+        
+        if (!requiredRole) {
+            return true; // 권한 설정이 없는 페이지는 모두 접근 가능
+        }
         
         return this.hasPermission(userRole, requiredRole);
     }
     
     async setPagePermission(path, role) {
         if (!Object.values(ROLES).includes(role)) {
-            throw new Error('잘못된 역할입니다.');
+            throw new Error(`유효하지 않은 권한: ${role}`);
         }
         
         this.permissions.pagePermissions[path] = role;
         await this.savePermissions();
-        logger.info(`📄 페이지 권한 변경: ${path} -> ${role}`);
+        
+        logger.permission(`페이지 권한 변경: ${path} -> ${role}`);
     }
     
     async getAllUsers() {
@@ -111,9 +133,9 @@ class PermissionManager {
         const files = await require('fs').promises.readdir(require('path').join(process.cwd(), 'data'));
         
         for (const file of files) {
-            if (file.startsWith('web_user_') && file.endsWith('.json')) {
-                const userId = file.replace('web_user_', '').replace('.json', '');
-                const userData = await dataManager.getUserData(`web_${userId}`);
+            if (file.startsWith('user_') && file.endsWith('.json')) {
+                const userId = file.replace('user_', '').replace('.json', '');
+                const userData = await dataManager.read(`user_${userId}`);
                 if (userData) {
                     users.push({
                         ...userData,
@@ -137,6 +159,54 @@ class PermissionManager {
         
         return stats;
     }
+    
+    // 캐시 관리 메서드
+    getCached(userId) {
+        const cached = this.roleCache.get(userId);
+        if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+            return cached.role;
+        }
+        return null;
+    }
+    
+    setCache(userId, role) {
+        this.roleCache.set(userId, {
+            role,
+            timestamp: Date.now()
+        });
+    }
+    
+    clearCache() {
+        this.roleCache.clear();
+    }
+    
+    // 권한 일괄 업데이트
+    async batchUpdateRoles(updates) {
+        for (const { userId, role } of updates) {
+            this.permissions.userRoles[userId] = role;
+        }
+        await this.savePermissions();
+        logger.permission(`권한 일괄 업데이트: ${updates.length}개`);
+    }
+    
+    // 권한 내보내기/가져오기
+    async exportPermissions() {
+        return {
+            version: '1.0',
+            exported: new Date().toISOString(),
+            permissions: this.permissions
+        };
+    }
+    
+    async importPermissions(data) {
+        if (data.version !== '1.0') {
+            throw new Error('호환되지 않는 권한 데이터 버전');
+        }
+        
+        this.permissions = data.permissions;
+        await this.savePermissions();
+        logger.permission('권한 데이터 가져오기 완료');
+    }
 }
 
 // 싱글톤 인스턴스
@@ -145,10 +215,15 @@ const permissionManager = new PermissionManager();
 // 미들웨어 함수들
 function requireAuth(req, res, next) {
     if (req.isAuthenticated()) {
-        req.userRole = permissionManager.getUserRole(req.user.id);
+        // 권한 캐싱
+        if (!req.userRole) {
+            req.userRole = permissionManager.getUserRole(req.user.id);
+        }
         return next();
     }
+    
     req.session.returnTo = req.originalUrl;
+    logger.access(`인증 필요: ${req.originalUrl}`);
     res.redirect('/login');
 }
 
@@ -159,13 +234,15 @@ function requireRole(role) {
             return res.redirect('/login');
         }
         
-        const userRole = permissionManager.getUserRole(req.user.id);
+        const userRole = req.userRole || permissionManager.getUserRole(req.user.id);
         req.userRole = userRole;
         
         if (permissionManager.hasPermission(userRole, role)) {
+            logger.access(`접근 허용: ${req.user.username} (${userRole}) -> ${req.path}`);
             return next();
         }
         
+        logger.security(`접근 거부: ${req.user.username} (${userRole}) -> ${req.path}`);
         res.status(403).render('error', { 
             error: '접근 권한이 없습니다.',
             user: req.user,
@@ -179,13 +256,14 @@ function checkPagePermission(req, res, next) {
         return next();
     }
     
-    const userRole = permissionManager.getUserRole(req.user.id);
+    const userRole = req.userRole || permissionManager.getUserRole(req.user.id);
     req.userRole = userRole;
     
     if (permissionManager.canAccessPage(req.user.id, req.path)) {
         return next();
     }
     
+    logger.security(`페이지 접근 거부: ${req.user.username} -> ${req.path}`);
     res.status(403).render('error', { 
         error: '이 페이지에 접근할 권한이 없습니다.',
         user: req.user,
@@ -193,10 +271,23 @@ function checkPagePermission(req, res, next) {
     });
 }
 
+// 권한 확인 헬퍼 함수
+function isAdmin(userId) {
+    return permissionManager.getUserRole(userId) === ROLES.ADMIN;
+}
+
+function isMember(userId) {
+    const role = permissionManager.getUserRole(userId);
+    return role === ROLES.MEMBER || role === ROLES.ADMIN;
+}
+
 module.exports = {
     ROLES,
+    ROLE_HIERARCHY,
     permissionManager,
     requireAuth,
     requireRole,
-    checkPagePermission
+    checkPagePermission,
+    isAdmin,
+    isMember
 };

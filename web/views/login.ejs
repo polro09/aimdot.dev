@@ -4,11 +4,6 @@
         <h2 class="text-3xl font-bold mb-2">로그인</h2>
         <p class="text-gray-400 mb-8">Discord 계정으로 로그인하세요</p>
         
-        <% 
-        const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
-        const error = urlParams.get('error');
-        %>
-        
         <% if (typeof error !== 'undefined' && error) { %>
             <div class="mb-6 bg-red-900/20 border border-red-700 rounded-lg p-4">
                 <p class="text-red-400">
@@ -19,6 +14,8 @@
                         인증 코드가 만료되었습니다. 다시 로그인해주세요.
                     <% } else if (error === 'no_code') { %>
                         인증 요청이 올바르지 않습니다. 다시 시도해주세요.
+                    <% } else if (error === 'session_error') { %>
+                        세션 저장에 실패했습니다. 다시 시도해주세요.
                     <% } else { %>
                         로그인 중 오류가 발생했습니다.
                     <% } %>
@@ -27,7 +24,7 @@
         <% } %>
         
         <a href="/auth/discord<%= typeof returnTo !== 'undefined' && returnTo ? '?returnTo=' + encodeURIComponent(returnTo) : '' %>" 
-           class="inline-flex items-center bg-discord hover:bg-discord-dark px-8 py-3 rounded-lg font-semibold transition transform hover:scale-105">
+           class="inline-flex items-center bg-purple-600 hover:bg-purple-700 px-8 py-3 rounded-lg font-semibold transition transform hover:scale-105">
             <i class="fab fa-discord mr-3 text-xl"></i>
             Discord로 로그인
         </a>

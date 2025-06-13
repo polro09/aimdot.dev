@@ -1,9 +1,9 @@
 // ========================================
-// web/server.js
+// web/server.js - 개선된 버전
 // ========================================
 const express = require('express');
 const session = require('express-session');
-const MemoryStore = require('memorystore')(session);
+const FileStore = require('session-file-store')(session);
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const path = require('path');
@@ -16,9 +16,16 @@ const eventBus = require('../utils/eventBus');
 const config = require('../config');
 const { ROLES, permissionManager, requireAuth, requireRole } = require('./utils/permissions');
 const os = require('os');
+const fs = require('fs');
 
 // Express 앱 초기화
 const app = express();
+
+// 세션 디렉토리 생성
+const sessionsDir = path.join(__dirname, '../sessions');
+if (!fs.existsSync(sessionsDir)) {
+    fs.mkdirSync(sessionsDir, { recursive: true });
+}
 
 // 보안 미들웨어
 app.use(helmet({
@@ -39,23 +46,27 @@ app.set('layout', 'layout');
 
 // 요청 로깅 미들웨어
 app.use((req, res, next) => {
-    logger.debug(`🌐 ${req.method} ${req.path} - ${req.ip}`);
+    logger.web(`${req.method} ${req.path}`, req.ip);
     next();
 });
 
-// 세션 설정
+// 세션 설정 - FileStore로 변경하여 영속성 보장
 app.use(session({
-    store: new MemoryStore({
-        checkPeriod: 86400000 // 24시간마다 만료된 세션 정리
+    store: new FileStore({
+        path: sessionsDir,
+        ttl: 30 * 24 * 60 * 60, // 30일
+        retries: 2,
+        secret: config.web.sessionSecret
     }),
     secret: config.web.sessionSecret,
     resave: false,
-    saveUninitialized: true, // 변경: 세션 저장 허용
+    saveUninitialized: false,
+    rolling: true, // 활동 시마다 세션 갱신
     cookie: {
-        secure: false, // 변경: 개발 환경에서는 false
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        sameSite: 'lax'
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30일
+        sameSite: 'strict'
     },
     name: 'aimdot.sid'
 }));
@@ -70,7 +81,7 @@ passport.use(new DiscordStrategy({
     clientSecret: config.discord.clientSecret,
     callbackURL: config.discord.callbackURL,
     scope: ['identify', 'guilds'],
-    prompt: 'none' // 자동 인증 시도
+    prompt: 'none'
 }, async (accessToken, refreshToken, profile, done) => {
     try {
         const userData = {
@@ -91,7 +102,7 @@ passport.use(new DiscordStrategy({
             await permissionManager.setUserRole(profile.id, ROLES.GUEST);
         }
         
-        logger.success(`🔐 Discord 로그인 성공: ${profile.username}#${profile.discriminator}`);
+        logger.auth(`Discord 로그인 성공: ${profile.username}#${profile.discriminator}`);
         return done(null, userData);
     } catch (error) {
         logger.error(`Discord 인증 오류: ${error.message}`);
@@ -107,25 +118,31 @@ passport.serializeUser((user, done) => {
 passport.deserializeUser(async (id, done) => {
     try {
         const user = await dataManager.read(`user_${id}`);
+        if (!user) {
+            return done(null, false);
+        }
         done(null, user);
     } catch (error) {
-        done(error);
+        done(error, false);
     }
 });
 
-// 뷰 변수 미들웨어
+// 뷰 변수 미들웨어 - 개선된 버전
 app.use(async (req, res, next) => {
     res.locals.user = req.user || null;
     res.locals.isAuthenticated = req.isAuthenticated();
     
     if (req.user) {
-        const role = permissionManager.getUserRole(req.user.id);
-        res.locals.userRole = role;
-        res.locals.isAdmin = role === ROLES.ADMIN;
-        res.locals.isMember = permissionManager.hasPermission(role, ROLES.MEMBER);
+        // 캐싱을 위해 req에 저장
+        if (!req.userRole) {
+            req.userRole = permissionManager.getUserRole(req.user.id);
+        }
         
-        // 디버깅을 위한 로그
-        logger.debug(`사용자 ${req.user.username} - 권한: ${role}`);
+        res.locals.userRole = req.userRole;
+        res.locals.isAdmin = req.userRole === ROLES.ADMIN;
+        res.locals.isMember = permissionManager.hasPermission(req.userRole, ROLES.MEMBER);
+        
+        logger.debug(`사용자 ${req.user.username} - 권한: ${req.userRole}`);
     } else {
         res.locals.userRole = ROLES.GUEST;
         res.locals.isAdmin = false;
@@ -169,7 +186,8 @@ app.get('/login', (req, res) => {
             return res.redirect(returnTo);
         }
         
-        const userRole = permissionManager.getUserRole(req.user.id);
+        const userRole = req.userRole || permissionManager.getUserRole(req.user.id);
+        
         if (userRole === ROLES.ADMIN) {
             return res.redirect('/dashboard');
         } else if (userRole === ROLES.MEMBER) {
@@ -186,16 +204,15 @@ app.get('/auth/discord', (req, res, next) => {
     if (req.query.returnTo) {
         req.session.returnTo = req.query.returnTo;
     }
-    logger.info('🔐 Discord OAuth2 인증 시작');
+    logger.auth('Discord OAuth2 인증 시작');
     passport.authenticate('discord')(req, res, next);
 });
 
 // Discord OAuth2 콜백
 app.get('/auth/discord/callback', 
     (req, res, next) => {
-        logger.info('🔐 Discord OAuth2 콜백 수신');
+        logger.auth('Discord OAuth2 콜백 수신');
         
-        // 코드가 없으면 에러 처리
         if (!req.query.code) {
             logger.error('OAuth2 콜백에 코드가 없습니다');
             return res.redirect('/login?error=no_code');
@@ -207,80 +224,85 @@ app.get('/auth/discord/callback',
         })(req, res, next);
     },
     (req, res) => {
-        logger.success('🔐 Discord OAuth2 인증 성공');
-        const userRole = permissionManager.getUserRole(req.user.id);
+        logger.auth('Discord OAuth2 인증 성공');
         
-        const returnTo = req.session.returnTo;
-        if (returnTo) {
-            delete req.session.returnTo;
-            return res.redirect(returnTo);
-        }
-        
-        if (userRole === ROLES.ADMIN) {
-            res.redirect('/dashboard');
-        } else if (userRole === ROLES.MEMBER) {
-            res.redirect('/party');
-        } else {
-            res.redirect('/');
-        }
+        // 세션 저장 확인
+        req.session.save((err) => {
+            if (err) {
+                logger.error('세션 저장 실패:', err);
+                return res.redirect('/login?error=session_error');
+            }
+            
+            const userRole = permissionManager.getUserRole(req.user.id);
+            
+            const returnTo = req.session.returnTo;
+            if (returnTo) {
+                delete req.session.returnTo;
+                return res.redirect(returnTo);
+            }
+            
+            if (userRole === ROLES.ADMIN) {
+                res.redirect('/dashboard');
+            } else if (userRole === ROLES.MEMBER) {
+                res.redirect('/party');
+            } else {
+                res.redirect('/');
+            }
+        });
     }
 );
 
 // 로그아웃
 app.get('/logout', (req, res) => {
     const username = req.user ? req.user.username : 'Unknown';
+    logger.auth(`웹 로그아웃: ${username}`);
+    
     req.logout((err) => {
         if (err) {
-            logger.error(`로그아웃 오류: ${err.message}`);
-        } else {
-            logger.info(`🔓 웹 로그아웃: ${username}`);
+            logger.error('로그아웃 오류:', err);
         }
-        res.redirect('/');
+        
+        req.session.destroy((err) => {
+            if (err) {
+                logger.error('세션 삭제 오류:', err);
+            }
+            res.clearCookie('aimdot.sid');
+            res.redirect('/');
+        });
     });
 });
 
-// 대시보드 (관리자 전용)
+// 대시보드 페이지 (관리자 전용)
 app.get('/dashboard', requireRole(ROLES.ADMIN), async (req, res) => {
     try {
         const BotClientManager = require('../utils/botClientManager');
         const botClient = BotClientManager.getClient();
         
-        // 봇 상태 정보
         const botStatus = {
+            name: botClient.user.tag,
+            avatar: botClient.user.displayAvatarURL(),
+            status: 'online',
+            uptime: process.uptime()
+        };
+        
+        const stats = {
             guildCount: botClient.guilds.cache.size,
             userCount: botClient.users.cache.size,
-            ping: botClient.ws.ping
+            channelCount: botClient.channels.cache.size,
+            commandCount: botClient.modules ? botClient.modules.size : 0
         };
         
-        // 통계 정보
-        const stats = {
-            guilds: botClient.guilds.cache.size,
-            users: botClient.users.cache.size,
-            channels: botClient.channels.cache.size,
-            uptime: process.uptime(),
-            memoryUsage: process.memoryUsage(),
-            dataStats: await dataManager.getStats(),
-            fileCount: (await dataManager.getStats()).fileCount || 0
-        };
+        const userStats = await permissionManager.getStats();
         
-        // 사용자 통계
-        const userStats = {
-            total: await dataManager.getStats().then(s => s.userCount || 0)
-        };
+        const guilds = botClient.guilds.cache
+            .sort((a, b) => b.memberCount - a.memberCount)
+            .first(10)
+            .map(guild => ({
+                name: guild.name,
+                memberCount: guild.memberCount,
+                icon: guild.iconURL()
+            }));
         
-        // 서버 목록
-        const guilds = botClient.guilds.cache.map(guild => ({
-            id: guild.id,
-            name: guild.name,
-            memberCount: guild.memberCount,
-            owner: guild.owner?.user.tag || 'Unknown',
-            boostLevel: guild.premiumTier,
-            boostCount: guild.premiumSubscriptionCount,
-            joinedAt: guild.joinedTimestamp,
-            createdAt: guild.createdTimestamp
-        }));
-        
-        // 로그 가져오기
         const logs = logger.getHistory ? logger.getHistory(null, 100) : [];
         
         res.render('dashboard', { 
@@ -326,9 +348,8 @@ app.get('/servers', requireRole(ROLES.ADMIN), async (req, res) => {
 // 파티 라우트
 const partyRoutes = require('./routes/partyRoutes');
 app.use('/party', requireAuth, (req, res, next) => {
-    const userRole = permissionManager.getUserRole(req.user.id);
+    const userRole = req.userRole || permissionManager.getUserRole(req.user.id);
     
-    // 권한 디버깅
     logger.debug(`파티 접근 시도 - 사용자: ${req.user.username}, 권한: ${userRole}`);
     
     if (!permissionManager.hasPermission(userRole, ROLES.MEMBER)) {
@@ -426,7 +447,7 @@ async function startWebServer() {
     
     const server = app.listen(config.web.port, () => {
         logger.separator();
-        logger.system(`🌐 웹 대시보드가 시작되었습니다!`);
+        logger.startup(`웹 대시보드가 시작되었습니다!`);
         logger.separator();
         
         const networkInterfaces = os.networkInterfaces();
@@ -450,17 +471,17 @@ async function startWebServer() {
         }
         
         logger.separator();
-        logger.success(`✅ 웹 대시보드 준비 완료!`);
+        logger.ready(`웹 대시보드 준비 완료!`);
         logger.info(`💡 팁: Ctrl+클릭으로 브라우저에서 바로 열 수 있습니다.`);
         logger.separator();
     });
     
     server.on('error', (error) => {
         if (error.code === 'EADDRINUSE') {
-            logger.error(`❌ 포트 ${config.web.port}이(가) 이미 사용 중입니다.`);
+            logger.error(`포트 ${config.web.port}이(가) 이미 사용 중입니다.`);
             logger.info(`💡 다른 포트를 사용하려면 .env 파일에서 WEB_PORT를 변경하세요.`);
         } else {
-            logger.error(`❌ 웹 서버 오류: ${error.message}`);
+            logger.error(`웹 서버 오류: ${error.message}`);
         }
     });
     
@@ -477,7 +498,7 @@ async function startWebServer() {
 
 // 설정 확인
 if (!config.discord.clientId || !config.discord.clientSecret) {
-    logger.error('❌ Discord OAuth2 설정이 없습니다!');
+    logger.error('Discord OAuth2 설정이 없습니다!');
     logger.info('💡 .env 파일에 DISCORD_CLIENT_ID와 DISCORD_CLIENT_SECRET를 설정하세요.');
 } else {
     logger.info(`✅ Discord OAuth2 설정 확인: Client ID: ${config.discord.clientId.substring(0, 8)}...`);
