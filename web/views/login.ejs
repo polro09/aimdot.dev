@@ -1,0 +1,61 @@
+<div class="max-w-md mx-auto mt-20">
+    <div class="glass rounded-lg p-8 text-center">
+        <img src="https://imgur.com/Sd8qK9c.gif" alt="Logo" class="w-24 h-24 mx-auto mb-6 rounded-full shadow-lg opacity-90">
+        <h2 class="text-3xl font-bold mb-2">로그인</h2>
+        <p class="text-gray-400 mb-8">Discord 계정으로 로그인하세요</p>
+        
+        <% 
+        const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+        const error = urlParams.get('error');
+        %>
+        
+        <% if (typeof error !== 'undefined' && error) { %>
+            <div class="mb-6 bg-red-900/20 border border-red-700 rounded-lg p-4">
+                <p class="text-red-400">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                    <% if (error === 'auth_failed') { %>
+                        인증에 실패했습니다. 잠시 후 다시 시도해주세요.
+                    <% } else if (error === 'invalid_code') { %>
+                        인증 코드가 만료되었습니다. 다시 로그인해주세요.
+                    <% } else if (error === 'no_code') { %>
+                        인증 요청이 올바르지 않습니다. 다시 시도해주세요.
+                    <% } else { %>
+                        로그인 중 오류가 발생했습니다.
+                    <% } %>
+                </p>
+            </div>
+        <% } %>
+        
+        <a href="/auth/discord<%= typeof returnTo !== 'undefined' && returnTo ? '?returnTo=' + encodeURIComponent(returnTo) : '' %>" 
+           class="inline-flex items-center bg-discord hover:bg-discord-dark px-8 py-3 rounded-lg font-semibold transition transform hover:scale-105">
+            <i class="fab fa-discord mr-3 text-xl"></i>
+            Discord로 로그인
+        </a>
+        
+        <div class="mt-8 text-sm text-gray-500">
+            <p class="mb-2">
+                <i class="fas fa-info-circle mr-1"></i>
+                첫 로그인 후 관리자에게 권한을 요청하세요
+            </p>
+            <p>
+                <i class="fas fa-shield-alt mr-1"></i>
+                Discord 계정 정보는 안전하게 보호됩니다
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+// URL 파라미터에서 에러 확인
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const error = urlParams.get('error');
+    if (error) {
+        // 5초 후 에러 파라미터 제거
+        setTimeout(() => {
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+        }, 5000);
+    }
+});
+</script>

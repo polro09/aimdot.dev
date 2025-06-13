@@ -1,0 +1,17 @@
+{
+  "pagePermissions": {
+    "/": "guest",
+    "/dashboard": "admin",
+    "/admin/permissions": "admin",
+    "/admin/party": "admin",
+    "/servers": "member",
+    "/party": "member",
+    "/party/create": "member",
+    "/logs": "admin",
+    "/settings": "member"
+  },
+  "userRoles": {
+    "257097077782216704": "guest"
+  },
+  "createdAt": "2025-06-13T07:41:08.326Z"
+}

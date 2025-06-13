@@ -1,0 +1,435 @@
+<div class="mb-8">
+    <h2 class="text-3xl font-bold mb-2">
+        <%= partyConfig.icon %> <%= party.title %>
+    </h2>
+    <p class="text-gray-400"><%= partyConfig.name %> | 생성자: <%= party.createdByName || party.createdBy %></p>
+</div>
+
+<!-- 파티 정보 -->
+<div class="glass-dark rounded-lg p-6 mb-6">
+    <div class="grid md:grid-cols-3 gap-6">
+        <div class="md:col-span-2">
+            <h3 class="text-xl font-semibold mb-3">파티 정보</h3>
+            <p class="text-gray-300 mb-4"><%= party.description %></p>
+            
+            <div class="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                    <p class="text-gray-400">시작 시간</p>
+                    <p class="font-semibold"><%= new Date(party.startTime).toLocaleString('ko-KR') %></p>
+                </div>
+                <div>
+                    <p class="text-gray-400">참가 조건</p>
+                    <p class="font-semibold"><%= party.requirements || '제한 없음' %></p>
+                </div>
+                <div>
+                    <p class="text-gray-400">최소 점수</p>
+                    <p class="font-semibold"><%= party.minScore || 0 %>점</p>
+                </div>
+                <div>
+                    <p class="text-gray-400">모집 인원</p>
+                    <p class="font-semibold"><%= party.members.length %>/<%= party.maxMembers %>명</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 내 정보 -->
+        <div class="bg-gray-900 rounded-lg p-4">
+            <h4 class="font-semibold mb-3">내 전적</h4>
+            <div class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-400">점수</span>
+                    <span class="font-bold text-yellow-400"><%= userStats.points %>점</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">승률</span>
+                    <span class="font-bold"><%= userStats.winRate %>%</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">평균 킬</span>
+                    <span class="font-bold"><%= userStats.avgKills %></span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">전투 수</span>
+                    <span class="font-bold"><%= userStats.totalGames %>판</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 대기실 -->
+<% if (waitingRoom && waitingRoom.length > 0) { %>
+    <div class="glass-dark rounded-lg p-6 mb-6">
+        <h3 class="text-xl font-semibold mb-4">
+            <i class="fas fa-door-open mr-2"></i>대기실 (<%= waitingRoom.length %>명)
+        </h3>
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <% waitingRoom.forEach(member => { %>
+                <div class="bg-gray-900 rounded-lg p-3">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <p class="font-medium"><%= member.username %></p>
+                            <div class="flex items-center gap-2 text-sm text-gray-400">
+                                <% if (member.selectedClassInfo) { %>
+                                    <span><%= member.selectedClassInfo.icon %> <%= member.selectedClassInfo.name %></span>
+                                <% } else { %>
+                                    <span><%= member.selectedClass %></span>
+                                <% } %>
+                                <span>|</span>
+                                <% if (member.selectedNationInfo) { %>
+                                    <img src="<%= member.selectedNationInfo.icon %>" alt="<%= member.selectedNationInfo.name %>" 
+                                         class="w-4 h-4 rounded inline-block">
+                                    <span><%= member.selectedNationInfo.name %></span>
+                                <% } else if (member.selectedNation) { %>
+                                    <span><%= member.selectedNation %></span>
+                                <% } %>
+                            </div>
+                            <p class="text-xs text-gray-500">
+                                <%= member.stats.points %>점 | 승률: <%= member.stats.winRate %>% | 평균킬: <%= member.stats.avgKills %>
+                            </p>
+                        </div>
+                        <% if (member.userId === user.id && partyConfig.teams > 1) { %>
+                            <div class="ml-2">
+                                <select onchange="moveToTeam('<%= member.userId %>', this.value)" 
+                                        class="text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1">
+                                    <option value="0">대기실</option>
+                                    <% for (let t = 1; t <= partyConfig.teams; t++) { %>
+                                        <option value="<%= t %>" <%= (teams[t]?.length || 0) >= partyConfig.maxPerTeam ? 'disabled' : '' %>>
+                                            <%= t %>팀으로
+                                        </option>
+                                    <% } %>
+                                </select>
+                            </div>
+                        <% } %>
+                    </div>
+                </div>
+            <% }) %>
+        </div>
+    </div>
+<% } %>
+
+<!-- 팀 구성 -->
+<div class="grid md:grid-cols-<%= partyConfig.teams %> gap-6 mb-6">
+    <% for (let teamNum = 1; teamNum <= partyConfig.teams; teamNum++) { %>
+        <div class="glass-dark rounded-lg p-6">
+            <h3 class="text-xl font-semibold mb-4 text-center">
+                <% if (partyConfig.teams > 1) { %>
+                    <%= teamNum %>팀
+                <% } else { %>
+                    참가자 목록
+                <% } %>
+                (<%= teams[teamNum]?.length || 0 %>/<%= partyConfig.maxPerTeam %>)
+            </h3>
+            
+            <div class="space-y-3">
+                <% if (teams[teamNum] && teams[teamNum].length > 0) { %>
+                    <% teams[teamNum].forEach(member => { %>
+                        <div class="bg-gray-900 rounded-lg p-3">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="font-medium"><%= member.username %></p>
+                                    <div class="flex items-center gap-2 text-sm text-gray-400">
+                                        <% if (member.selectedClassInfo) { %>
+                                            <span><%= member.selectedClassInfo.icon %> <%= member.selectedClassInfo.name %></span>
+                                        <% } else { %>
+                                            <span><%= member.selectedClass %></span>
+                                        <% } %>
+                                        <% if (member.selectedNationInfo) { %>
+                                            <span>|</span>
+                                            <img src="<%= member.selectedNationInfo.icon %>" alt="<%= member.selectedNationInfo.name %>" 
+                                                 class="w-4 h-4 rounded inline-block">
+                                            <span><%= member.selectedNationInfo.name %></span>
+                                        <% } else if (member.selectedNation) { %>
+                                            <span>| <%= member.selectedNation %></span>
+                                        <% } %>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-xs text-gray-500"><%= member.stats.points %>점</p>
+                                    <p class="text-xs text-gray-500">승률: <%= member.stats.winRate %>%</p>
+                                    <% if (member.userId === user.id) { %>
+                                        <button onclick="moveToTeam('<%= member.userId %>', '0')" 
+                                                class="text-xs text-yellow-400 hover:text-yellow-300 mt-1">
+                                            <i class="fas fa-door-open"></i> 대기실로
+                                        </button>
+                                    <% } %>
+                                </div>
+                            </div>
+                        </div>
+                    <% }) %>
+                <% } %>
+                
+                <!-- 빈 슬롯 -->
+                <% for (let i = (teams[teamNum]?.length || 0); i < partyConfig.maxPerTeam; i++) { %>
+                    <div class="border-2 border-dashed border-gray-700 rounded-lg p-3 text-center text-gray-500">
+                        <i class="fas fa-user-plus"></i> 대기 중
+                    </div>
+                <% } %>
+            </div>
+        </div>
+    <% } %>
+</div>
+
+<!-- 참가/나가기 버튼 -->
+<% if (!isJoined && party.status === 'recruiting') { %>
+    <div class="glass-dark rounded-lg p-6">
+        <h3 class="text-xl font-semibold mb-4">파티 참가</h3>
+        
+        <% if (userStats.points < party.minScore) { %>
+            <div class="bg-red-900 bg-opacity-20 border border-red-700 rounded-lg p-4 mb-4">
+                <p class="text-red-400">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                    최소 <%= party.minScore %>점이 필요합니다. (현재: <%= userStats.points %>점)
+                </p>
+            </div>
+        <% } else { %>
+            <form id="joinPartyForm">
+                <div class="grid md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-2">병과 선택</label>
+                        <select name="selectedClass" required class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2">
+                            <option value="">병과를 선택하세요</option>
+                            <optgroup label="일반 병과">
+                                <% classes.일반.forEach(cls => { %>
+                                    <option value="<%= cls.id %>">
+                                        <%= cls.icon %> <%= cls.name %>
+                                    </option>
+                                <% }) %>
+                            </optgroup>
+                            <optgroup label="귀족 병과">
+                                <% classes.귀족.forEach(cls => { %>
+                                    <option value="<%= cls.id %>">
+                                        <%= cls.icon %> <%= cls.name %>
+                                    </option>
+                                <% }) %>
+                            </optgroup>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-2">국가 선택</label>
+                        <select name="selectedNation" required class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2">
+                            <option value="">국가를 선택하세요</option>
+                            <% nations.forEach(nation => { %>
+                                <option value="<%= nation.id %>">
+                                    <%= nation.name %>
+                                </option>
+                            <% }) %>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- 병과/국가 미리보기 -->
+                <div id="selectionPreview" class="hidden mb-4 p-3 bg-gray-900 rounded-lg">
+                    <div class="flex items-center gap-4">
+                        <div id="classPreview" class="flex items-center gap-2"></div>
+                        <div id="nationPreview" class="flex items-center gap-2"></div>
+                    </div>
+                </div>
+                
+                <button type="submit" class="w-full bg-red-600 hover:bg-red-700 px-6 py-3 rounded-lg transition">
+                    <i class="fas fa-door-open mr-2"></i>대기실 입장
+                </button>
+            </form>
+        <% } %>
+    </div>
+<% } else if (isJoined && party.status === 'recruiting') { %>
+    <div class="glass-dark rounded-lg p-6 text-center">
+        <p class="text-green-400 mb-4">
+            <i class="fas fa-check-circle mr-2"></i>파티에 참가 중입니다.
+        </p>
+        <p class="text-sm text-gray-400 mb-4">
+            대기실에서 팀으로 이동하거나, 팀을 변경할 수 있습니다.
+        </p>
+        <button onclick="leaveParty()" class="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-lg transition">
+            <i class="fas fa-sign-out-alt mr-2"></i>파티 나가기
+        </button>
+    </div>
+<% } else if (party.status !== 'recruiting') { %>
+    <div class="glass-dark rounded-lg p-6 text-center">
+        <p class="text-gray-400">
+            <i class="fas fa-lock mr-2"></i>이 파티는 더 이상 모집하지 않습니다.
+        </p>
+    </div>
+<% } %>
+
+<!-- 파티 관리 (개최자만) -->
+<% if (isCreator && party.status === 'recruiting') { %>
+    <div class="glass-dark rounded-lg p-6 mt-6 text-center">
+        <h3 class="text-xl font-semibold mb-4">파티 관리</h3>
+        <button onclick="cancelParty()" class="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-lg transition">
+            <i class="fas fa-times mr-2"></i>파티 취소
+        </button>
+    </div>
+<% } %>
+
+<script>
+const partyId = '<%= party.id %>';
+
+// 선택 미리보기 업데이트
+document.addEventListener('DOMContentLoaded', function() {
+    const classSelect = document.querySelector('select[name="selectedClass"]');
+    const nationSelect = document.querySelector('select[name="selectedNation"]');
+    
+    if (classSelect) {
+        classSelect.addEventListener('change', updatePreview);
+    }
+    if (nationSelect) {
+        nationSelect.addEventListener('change', updatePreview);
+    }
+});
+
+function updatePreview() {
+    const classSelect = document.querySelector('select[name="selectedClass"]');
+    const nationSelect = document.querySelector('select[name="selectedNation"]');
+    const preview = document.getElementById('selectionPreview');
+    const classPreview = document.getElementById('classPreview');
+    const nationPreview = document.getElementById('nationPreview');
+    
+    if (!preview) return;
+    
+    if ((classSelect && classSelect.value) || (nationSelect && nationSelect.value)) {
+        preview.classList.remove('hidden');
+        
+        // 병과 미리보기 - 선택된 옵션의 텍스트 사용
+        if (classSelect && classSelect.value && classPreview) {
+            const selectedOption = classSelect.options[classSelect.selectedIndex];
+            classPreview.innerHTML = '<span class="text-gray-400">병과:</span> ' + selectedOption.text;
+        }
+        
+        // 국가 미리보기 - 선택된 옵션의 텍스트 사용
+        if (nationSelect && nationSelect.value && nationPreview) {
+            const selectedOption = nationSelect.options[nationSelect.selectedIndex];
+            nationPreview.innerHTML = '<span class="text-gray-400">국가:</span> ' + selectedOption.text;
+        }
+    } else {
+        preview.classList.add('hidden');
+    }
+}
+
+// 팀 이동
+async function moveToTeam(userId, team) {
+    try {
+        const response = await fetch('/party/api/move/' + partyId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team: parseInt(team) })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const message = team === '0' ? '대기실로 이동했습니다.' : team + '팀으로 이동했습니다.';
+            showAlert('success', message);
+            setTimeout(() => window.location.reload(), 500);
+        } else {
+            showAlert('error', result.error || '팀 이동에 실패했습니다.');
+        }
+    } catch (error) {
+        showAlert('error', error.message);
+    }
+}
+
+// 파티 참가 폼 제출
+const joinForm = document.getElementById('joinPartyForm');
+if (joinForm) {
+    joinForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const data = Object.fromEntries(formData);
+        
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>참가 중...';
+        submitBtn.disabled = true;
+        
+        try {
+            const response = await fetch('/party/api/join/' + partyId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showAlert('success', '대기실로 입장했습니다! 원하는 팀으로 이동할 수 있습니다.');
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                throw new Error(result.error || '파티 참가에 실패했습니다.');
+            }
+        } catch (error) {
+            showAlert('error', error.message);
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
+    });
+}
+
+// 파티 나가기
+async function leaveParty() {
+    if (!confirm('정말로 파티에서 나가시겠습니까?')) return;
+    
+    try {
+        const response = await fetch('/party/api/leave/' + partyId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showAlert('success', '파티에서 나갔습니다.');
+            setTimeout(() => window.location.href = '/party', 1000);
+        } else {
+            throw new Error(result.error || '파티 나가기에 실패했습니다.');
+        }
+    } catch (error) {
+        showAlert('error', error.message);
+    }
+}
+
+// 파티 취소 (개최자만)
+async function cancelParty() {
+    if (!confirm('정말로 파티를 취소하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) return;
+    
+    try {
+        const response = await fetch('/party/api/cancel/' + partyId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showAlert('success', '파티가 취소되었습니다.');
+            setTimeout(() => window.location.href = '/party', 1000);
+        } else {
+            throw new Error(result.error || '파티 취소에 실패했습니다.');
+        }
+    } catch (error) {
+        showAlert('error', error.message);
+    }
+}
+
+// 알림 표시 함수
+function showAlert(type, message) {
+    const alertDiv = document.createElement('div');
+    const bgColor = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+    const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+    
+    alertDiv.className = 'fixed top-4 right-4 ' + bgColor + ' text-white px-6 py-3 rounded-lg shadow-lg z-50 flex items-center';
+    alertDiv.innerHTML = '<i class="fas ' + icon + ' mr-2"></i>' + message;
+    document.body.appendChild(alertDiv);
+    
+    setTimeout(() => alertDiv.remove(), 3000);
+}
+
+// 자동 새로고침 (15초마다)
+setInterval(() => {
+    if (document.visibilityState === 'visible') {
+        window.location.reload();
+    }
+}, 15000);
+</script>
